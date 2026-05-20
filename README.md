@@ -1,36 +1,100 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Document Upload UI
+
+A file upload web application that uploads documents to MinIO (S3-compatible storage) using presigned URLs, designed to integrate with an n8n document processing pipeline.
+
+## Tech Stack
+
+| Layer | Technology | Version | Purpose |
+|-------|-----------|---------|---------|
+| Framework | Next.js (App Router) | 16.2.6 | Full-stack React framework with API routes |
+| Language | TypeScript | ^5 | Type-safe development |
+| UI Library | React | 19.2.4 | Component-based UI |
+| Styling | Tailwind CSS | ^4 | Utility-first CSS framework |
+| Icons | Lucide React | ^1.14.0 | SVG icon library |
+| Storage SDK | AWS SDK S3 Client | ^3.967.0 | S3/MinIO presigned URL generation |
+| Object Storage | MinIO | - | S3-compatible file storage |
+| Font | Geist (Sans & Mono) | - | Typography via next/font |
+
+## Architecture
+
+```
+Browser                    Next.js Server              MinIO
+  │                            │                        │
+  ├─ GET /api/presigned-url ──►│                        │
+  │                            ├─ Generate presigned ──►│
+  │◄── { url, key } ──────────┤                        │
+  │                            │                        │
+  ├─ PUT (presigned URL) ─────────────────────────────►│
+  │    (direct upload with progress tracking)           │
+```
+
+1. Client requests a presigned PUT URL from the Next.js API route
+2. API generates a time-limited (5 min) presigned URL via AWS SDK
+3. Client uploads directly to MinIO using XHR (enables progress tracking)
+4. Upload history is persisted in localStorage
+
+## Project Structure
+
+```
+upload-ui/
+├── app/
+│   ├── api/presigned-url/route.ts   # API: generates presigned upload URLs
+│   ├── components/
+│   │   ├── FileList.tsx             # Upload history list
+│   │   ├── ProgressBar.tsx          # Upload progress indicator
+│   │   └── UploadZone.tsx           # Drag-and-drop file selector
+│   ├── globals.css                  # Tailwind imports & theme
+│   ├── layout.tsx                   # Root layout with fonts
+│   └── page.tsx                     # Main upload page
+├── lib/
+│   └── s3-client.ts                 # S3Client singleton configuration
+├── .env.local                       # Environment variables (not committed)
+├── next.config.ts                   # Next.js configuration
+├── package.json                     # Dependencies & scripts
+└── tsconfig.json                    # TypeScript configuration
+```
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Node.js 20+ (see `.nvmrc`)
+- MinIO instance running (or any S3-compatible storage)
+
+### Environment Variables
+
+Copy `.env.example` to `.env.local` and configure:
+
+```env
+MINIO_ENDPOINT=http://ip-server:9000
+MINIO_ACCESS_KEY=your-access-key
+MINIO_SECRET_KEY=your-secret-key
+MINIO_BUCKET=n8n
+MINIO_REGION=us-east-1
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Run Development Server
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open [http://localhost:3000](http://localhost:3000).
 
-## Learn More
+### Scripts
 
-To learn more about Next.js, take a look at the following resources:
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start dev server (port 3000) |
+| `npm run build` | Production build |
+| `npm start` | Start production server |
+| `npm run lint` | Run ESLint |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Key Features
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Drag & drop** file upload with multi-file support
+- **Direct upload** to MinIO via presigned URLs (no server relay)
+- **Real-time progress** tracking using XHR
+- **Upload history** persisted in localStorage
+- **Dark mode** support via CSS media query
