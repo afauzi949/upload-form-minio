@@ -5,6 +5,7 @@ import { FileUp } from "lucide-react";
 import UploadZone from "./components/UploadZone";
 import FileList, { UploadedFile } from "./components/FileList";
 
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
 const STORAGE_KEY = "uploaded-files";
 
 function loadFilesFromStorage(): UploadedFile[] {
@@ -40,74 +41,91 @@ export default function Home() {
     saveFilesToStorage(files);
   }, [files]);
 
-  const uploadFile = useCallback(async (file: File, fileId: string) => {
-    try {
-      // Step 1: Get presigned URL
-      const params = new URLSearchParams({
-        filename: file.name,
-        contentType: file.type || "application/octet-stream",
-      });
-      const res = await fetch(`/api/presigned-url?${params}`);
-      if (!res.ok) {
-        throw new Error("Failed to get presigned URL");
+  const pollStatus = useCallback((fileId: string, localId: string) => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/status/${fileId}`);
+        if (!res.ok) return;
+
+        const data = await res.json();
+
+        setFiles((prev) =>
+          prev.map((f) => {
+            if (f.id !== localId) return f;
+            return {
+              ...f,
+              status: data.status as UploadedFile["status"],
+              indexedAt: data.indexed_at,
+              chunkCount: data.chunk_count,
+              error: data.error_msg,
+            };
+          })
+        );
+
+        // Stop polling jika status final
+        if (data.status === "done" || data.status === "failed") {
+          clearInterval(interval);
+        }
+      } catch {
+        // Ignore polling errors, will retry
       }
-      const { url, key } = await res.json();
+    }, 3000); // Poll setiap 3 detik
 
-      // Step 2: Upload to MinIO via presigned URL using XHR for progress
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("PUT", url, true);
-        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    // Cleanup: stop polling setelah 5 menit (safety timeout)
+    setTimeout(() => clearInterval(interval), 5 * 60 * 1000);
+  }, []);
 
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const progress = (event.loaded / event.total) * 100;
-            setFiles((prev) =>
-              prev.map((f) => (f.id === fileId ? { ...f, progress } : f))
-            );
-          }
-        };
+  const uploadFile = useCallback(async (file: File, localId: string) => {
+    try {
+      // Step 1: Upload file ke Backend API
+      const formData = new FormData();
+      formData.append("file", file);
 
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve();
-          } else {
-            reject(new Error(`Upload failed with status ${xhr.status}`));
-          }
-        };
-
-        xhr.onerror = () => reject(new Error("Network error during upload"));
-        xhr.send(file);
+      const res = await fetch(`${BACKEND_URL}/upload`, {
+        method: "POST",
+        body: formData,
       });
 
-      // Step 3: Mark as success
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Upload failed with status ${res.status}`);
+      }
+
+      const data = await res.json();
+      // data = { file_id, status: "pending", message: "File queued for processing" }
+
+      // Step 2: Update state — status jadi "pending", simpan file_id untuk polling
       setFiles((prev) =>
         prev.map((f) =>
-          f.id === fileId
+          f.id === localId
             ? {
                 ...f,
-                status: "success" as const,
+                status: "pending" as const,
                 progress: 100,
-                key,
+                fileId: data.file_id,
                 uploadedAt: new Date().toISOString(),
               }
             : f
         )
       );
+
+      // Step 3: Mulai polling status
+      pollStatus(data.file_id, localId);
+
     } catch (error) {
       setFiles((prev) =>
         prev.map((f) =>
-          f.id === fileId
+          f.id === localId
             ? {
                 ...f,
-                status: "error" as const,
+                status: "failed" as const,
                 error: error instanceof Error ? error.message : "Upload failed",
               }
             : f
         )
       );
     }
-  }, []);
+  }, [pollStatus]);
 
   const handleFilesSelected = useCallback(
     async (selectedFiles: File[]) => {
@@ -137,8 +155,9 @@ export default function Home() {
     setFiles((prev) => prev.filter((f) => f.id !== id));
   }, []);
 
-  const successCount = files.filter((f) => f.status === "success").length;
-  const errorCount = files.filter((f) => f.status === "error").length;
+  const doneCount = files.filter((f) => f.status === "done").length;
+  const processingCount = files.filter((f) => f.status === "processing" || f.status === "pending").length;
+  const failedCount = files.filter((f) => f.status === "failed").length;
 
   return (
     <div className="min-h-screen bg-slate-50 py-10 px-4">
@@ -172,14 +191,19 @@ export default function Home() {
             <span className="text-slate-500">
               {files.length} file{files.length !== 1 ? "s" : ""} total
             </span>
-            {successCount > 0 && (
+            {doneCount > 0 && (
               <span className="text-green-600 font-medium">
-                {successCount} uploaded
+                {doneCount} done
               </span>
             )}
-            {errorCount > 0 && (
+            {processingCount > 0 && (
+              <span className="text-blue-600 font-medium">
+                {processingCount} processing
+              </span>
+            )}
+            {failedCount > 0 && (
               <span className="text-red-600 font-medium">
-                {errorCount} failed
+                {failedCount} failed
               </span>
             )}
           </div>
