@@ -3,13 +3,16 @@
 import { FileText, CheckCircle2, XCircle, Clock, Trash2 } from "lucide-react";
 
 export interface UploadedFile {
-  id: string;
+  id: string;            // Saat upload: local ID. Setelah upload: file_id dari backend
   name: string;
   size: number;
-  status: "uploading" | "success" | "error";
+  status: "uploading" | "pending" | "processing" | "done" | "failed";
   progress: number;
+  fileId?: string;       // UUID dari backend (untuk polling)
   key?: string;
   uploadedAt?: string;
+  indexedAt?: string;    // Waktu selesai indexing
+  chunkCount?: number;   // Jumlah chunk yang di-embed
   error?: string;
 }
 
@@ -26,12 +29,26 @@ function formatFileSize(bytes: number): string {
 
 function StatusIcon({ status }: { status: UploadedFile["status"] }) {
   switch (status) {
-    case "success":
+    case "done":
       return <CheckCircle2 className="w-5 h-5 text-green-500" />;
-    case "error":
+    case "failed":
       return <XCircle className="w-5 h-5 text-red-500" />;
     case "uploading":
       return <Clock className="w-5 h-5 text-blue-500 animate-pulse" />;
+    case "pending":
+      return <Clock className="w-5 h-5 text-yellow-500" />;
+    case "processing":
+      return <Clock className="w-5 h-5 text-blue-500 animate-pulse" />;
+  }
+}
+
+function statusLabel(status: UploadedFile["status"]): string {
+  switch (status) {
+    case "uploading": return "Uploading...";
+    case "pending": return "Queued";
+    case "processing": return "Processing...";
+    case "done": return "Done";
+    case "failed": return "Failed";
   }
 }
 
@@ -69,6 +86,25 @@ export default function FileList({ files, onRemove }: FileListProps) {
                 <>
                   <span>&middot;</span>
                   <span className="text-red-500">{file.error}</span>
+                </>
+              )}
+              {/* Pipeline info */}
+              {file.status === "done" && file.chunkCount && (
+                <>
+                  <span>&middot;</span>
+                  <span className="text-green-600">{file.chunkCount} chunks indexed</span>
+                </>
+              )}
+              {file.status === "pending" && (
+                <>
+                  <span>&middot;</span>
+                  <span className="text-yellow-600">Waiting for pipeline...</span>
+                </>
+              )}
+              {file.status === "processing" && (
+                <>
+                  <span>&middot;</span>
+                  <span className="text-blue-600">Pipeline processing...</span>
                 </>
               )}
             </div>
